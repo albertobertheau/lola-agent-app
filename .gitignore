@@ -1,0 +1,16 @@
+# Python virtual environment
+lola_env/
+lola_env_BROKEN/
+
+# Secret files
+.env
+token.json
+client_secret.json
+.streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Temporary files
+temp_docs/
