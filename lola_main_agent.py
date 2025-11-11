@@ -129,15 +129,25 @@ class LolaAgent:
         # 1. Enrutar la petición para decidir qué herramienta usar
         chosen_tool = self.route_query(user_query)
         
+        # --- THIS IS THE NEW DIAGNOSTIC LINE ---
+        print(f"🛠️ Herramienta seleccionada por el router: '{chosen_tool}'")
+        # --- END OF DIAGNOSTIC LINE ---
+
         # 2. Ejecutar la herramienta seleccionada
-        if chosen_tool == "generation":
-            return perform_content_generation(user_query, lola_gemini_model, self.knowledge_base)
-        elif chosen_tool == "analysis":
-            return perform_strategic_analysis(user_query, lola_gemini_model, self.knowledge_base)
-        elif chosen_tool == "writing":
-            return perform_document_writing(user_query, lola_gemini_model, self.drive_service)
-        else: # "qa" es el default
-            return perform_qa(user_query, lola_gemini_model, self.knowledge_base)
+        try:
+            if chosen_tool == "generation":
+                return perform_content_generation(user_query, lola_gemini_model, self.knowledge_base)
+            elif chosen_tool == "analysis":
+                return perform_strategic_analysis(user_query, lola_gemini_model, self.knowledge_base)
+            else: # "qa" es el default
+                return perform_qa(user_query, lola_gemini_model, self.knowledge_base)
+        except Exception as e:
+            if "429" in str(e) and "quota" in str(e).lower():
+                print(f"❌ Límite de tasa de Gemini alcanzado. Error: {e}")
+                return "He recibido demasiadas peticiones en este momento. Por favor, espera un minuto antes de volver a preguntar."
+            else:
+                print(f"❌ Error ejecutando la herramienta '{chosen_tool}': {e}")
+                return "Lo siento, tuve un problema inesperado al procesar tu petición."
 
     def check_for_updates(self):
         """Periodically checks Google Drive for new or modified files and updates the KB."""
