@@ -7,27 +7,29 @@ from drive_utils import append_to_google_doc, append_row_to_google_sheet
 # para que no tengamos que inicializarlos aquí.
 
 def perform_qa(user_query, lola_gemini_model, knowledge_base):
-    """Herramienta para Preguntas y Respuestas directas. Es extremadamente estricta y no tiene memoria."""
-    print("🧠 Usando Herramienta: Pregunta y Respuesta (Q&A) - Modo Estricto")
+    """
+    Herramienta para Preguntas y Respuestas directas.
+    Es estricta para no usar conocimiento externo, pero puede sintetizar respuestas.
+    """
+    print("🧠 Usando Herramienta: Pregunta y Respuesta (Q&A) - Modo Balanceado")
     
-    # --- THIS IS THE NEW, "MEMORYLESS" PROMPT ---
+    # --- THIS IS THE NEW, BALANCED PROMPT ---
     persona_prompt = (
-        "Eres un motor de búsqueda de texto. Tu única función es analizar el texto proporcionado en la sección 'Contexto del Documento' para responder la 'Pregunta del Usuario'.\n"
-        "REGLAS ABSOLUTAS:\n"
-        "1. NO uses ningún conocimiento externo o previo. Olvida todo lo que sabes.\n"
-        "2. Basa tu respuesta **única y exclusivamente** en el 'Contexto del Documento' proporcionado.\n"
-        "3. Si el 'Contexto del Documento' no contiene la respuesta explícita a la 'Pregunta del Usuario', debes responder **exactamente y únicamente** con la frase: 'No tengo esa información específica en mis documentos.'\n"
-        "4. No intentes interpretar, inferir o adivinar. Si la respuesta no está escrita literalmente, no existe."
+        "Eres un asistente de IA experto llamado Lola. Tu tarea es responder la 'Pregunta del Usuario' basándote únicamente en la información contenida en el 'Contexto del Documento'.\n"
+        "REGLAS IMPORTANTES:\n"
+        "1. Tu respuesta DEBE derivarse exclusivamente del 'Contexto del Documento'. No utilices conocimiento externo.\n"
+        "2. Puedes sintetizar y combinar información de diferentes partes del contexto para construir una respuesta completa y coherente.\n"
+        "3. Si, después de analizar todo el contexto, la respuesta a la pregunta no se puede construir, responde de forma clara y directa: 'No tengo esa información específica en mis documentos.' No inventes ni supongas nada."
     )
     
-    # Lógica RAG (The same as before)
+    # RAG Logic (The same as before)
     results = knowledge_base.query(user_query, n_results=5)
     retrieved_content = []
     if results and results['documents'] and results['documents'][0]:
         retrieved_content = results['documents'][0]
     
     context_prompt = "\n\n**Contexto del Documento:**\n---\n" + "\n---\n".join(retrieved_content) + "\n---\n"
-    full_prompt = f"{persona_prompt}\n\n**Pregunta del Usuario:** {user_query}\n\n**Respuesta:**"
+    full_prompt = f"{persona_prompt}\n\n**Pregunta del Usuario:** {user_query}\n\n**Respuesta de Lola:**"
     
     response = lola_gemini_model.generate_content(full_prompt)
     return response.text
