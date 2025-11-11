@@ -7,22 +7,27 @@ from drive_utils import append_to_google_doc, append_row_to_google_sheet
 # para que no tengamos que inicializarlos aquí.
 
 def perform_qa(user_query, lola_gemini_model, knowledge_base):
-    """Herramienta para Preguntas y Respuestas directas. Muy estricta."""
-    print("🧠 Usando Herramienta: Pregunta y Respuesta (Q&A)")
+    """Herramienta para Preguntas y Respuestas directas. Es extremadamente estricta y no tiene memoria."""
+    print("🧠 Usando Herramienta: Pregunta y Respuesta (Q&A) - Modo Estricto")
     
+    # --- THIS IS THE NEW, "MEMORYLESS" PROMPT ---
     persona_prompt = (
-        "Eres un asistente de IA llamado Lola. Tu única tarea es responder preguntas basándote exclusivamente en la 'Información Relevante' proporcionada. "
-        "REGLA CRÍTICA: Si la respuesta no está explícitamente en el texto, debes responder EXACTAMENTE: 'No tengo esa información específica en mis documentos.'"
+        "Eres un motor de búsqueda de texto. Tu única función es analizar el texto proporcionado en la sección 'Contexto del Documento' para responder la 'Pregunta del Usuario'.\n"
+        "REGLAS ABSOLUTAS:\n"
+        "1. NO uses ningún conocimiento externo o previo. Olvida todo lo que sabes.\n"
+        "2. Basa tu respuesta **única y exclusivamente** en el 'Contexto del Documento' proporcionado.\n"
+        "3. Si el 'Contexto del Documento' no contiene la respuesta explícita a la 'Pregunta del Usuario', debes responder **exactamente y únicamente** con la frase: 'No tengo esa información específica en mis documentos.'\n"
+        "4. No intentes interpretar, inferir o adivinar. Si la respuesta no está escrita literalmente, no existe."
     )
     
-    # Lógica RAG (idéntica a la que ya tienes)
+    # Lógica RAG (The same as before)
     results = knowledge_base.query(user_query, n_results=5)
     retrieved_content = []
     if results and results['documents'] and results['documents'][0]:
         retrieved_content = results['documents'][0]
     
-    context_prompt = "\n\n**Información Relevante:**\n" + "\n---\n".join(retrieved_content)
-    full_prompt = f"{persona_prompt}{context_prompt}\n\n**Consulta del Usuario:** {user_query}\n\n**Respuesta de Lola:**"
+    context_prompt = "\n\n**Contexto del Documento:**\n---\n" + "\n---\n".join(retrieved_content) + "\n---\n"
+    full_prompt = f"{persona_prompt}\n\n**Pregunta del Usuario:** {user_query}\n\n**Respuesta:**"
     
     response = lola_gemini_model.generate_content(full_prompt)
     return response.text
