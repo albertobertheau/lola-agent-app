@@ -228,19 +228,31 @@ if __name__ == '__main__':
     lola.populate_knowledge_base()
     print("Población inicial completada.")
     
-    # --- NEW: SCHEDULER IS NOW CONFIGURED AND RUNNING ---
     scheduler = BackgroundScheduler()
     scheduler.add_job(lola.check_for_updates, 'interval', minutes=30, id="drive_update_check")
     scheduler.start()
     print("Lola Agent running with scheduled tasks. Type 'salir' to exit.")
-    # --- END OF NEW SCHEDULER LOGIC ---
-
+    print("\nLola está lista. Haz tus preguntas sobre ChainBrief.")
+    
     try:
         while True:
             user_input = input("\nTu pregunta: ")
-            if user_input.lower() == 'salir': break
+            if user_input.lower() == 'salir': 
+                break
+
+            # --- NEW: MANUAL UPDATE TRIGGER ---
+            query_lower = user_input.lower()
+            if 'actualiza' in query_lower or 'update' in query_lower or 'sincroniza' in query_lower or 'sync' in query_lower:
+                print("\nLola: Entendido. Iniciando una sincronización manual con Google Drive...")
+                lola.check_for_updates()
+                print("\nLola: ¡Sincronización completada! Ya tengo la información más reciente.")
+                continue # Skip the answer_query part and ask for the next question
+            # --- END OF NEW TRIGGER ---
+
+            # If it's not an update command, proceed as normal
             response = lola.answer_query(user_input)
             print(f"\nLola: {response}")
+            
     finally:
         print("\nApagando Lola Agent...")
         scheduler.shutdown()
