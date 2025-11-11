@@ -125,26 +125,19 @@ class LolaAgent:
         """Responde a una consulta del usuario usando el enrutador de tareas."""
         if not lola_gemini_model:
             return "Lo siento, mi modelo no está inicializado."
-            
+        
+        # 1. Enrutar la petición para decidir qué herramienta usar
         chosen_tool = self.route_query(user_query)
         
-        try:
-            if chosen_tool == "generation":
-                return perform_content_generation(user_query, lola_gemini_model, self.knowledge_base)
-            elif chosen_tool == "analysis":
-                return perform_strategic_analysis(user_query, lola_gemini_model, self.knowledge_base)
-            elif chosen_tool == "writing":
-                # La herramienta de escritura necesita el 'drive_service' en lugar de la 'knowledge_base'
-                return perform_document_writing(user_query, lola_gemini_model, self.drive_service)
-            else: # "qa" es el default
-                return perform_qa(user_query, lola_gemini_model, self.knowledge_base)
-        except Exception as e:
-            if "429" in str(e) and "quota" in str(e).lower():
-                print(f"❌ Límite de tasa de Gemini alcanzado. Error: {e}")
-                return "He recibido demasiadas peticiones en este momento. Por favor, espera un minuto antes de volver a preguntar."
-            else:
-                print(f"❌ Error ejecutando la herramienta: {e}")
-                return "Lo siento, tuve un problema inesperado al procesar tu petición."
+        # 2. Ejecutar la herramienta seleccionada
+        if chosen_tool == "generation":
+            return perform_content_generation(user_query, lola_gemini_model, self.knowledge_base)
+        elif chosen_tool == "analysis":
+            return perform_strategic_analysis(user_query, lola_gemini_model, self.knowledge_base)
+        elif chosen_tool == "writing":
+            return perform_document_writing(user_query, lola_gemini_model, self.drive_service)
+        else: # "qa" es el default
+            return perform_qa(user_query, lola_gemini_model, self.knowledge_base)
 
     def check_for_updates(self):
         """Periodically checks Google Drive for new or modified files and updates the KB."""
@@ -180,22 +173,19 @@ if __name__ == '__main__':
     print("\nIniciando población inicial...")
     lola.populate_knowledge_base()
     print("Población inicial completada.")
+    
     scheduler = BackgroundScheduler()
     scheduler.add_job(lola.check_for_updates, 'interval', minutes=30, id="drive_update_check")
     scheduler.start()
     print("Lola Agent running with scheduled tasks. Type 'salir' to exit.")
     print("\nLola está lista. Haz tus preguntas sobre ChainBrief.")
+    
     try:
         while True:
             user_input = input("\nTu pregunta: ")
             
-            # --- NEW: CHECK FOR EMPTY INPUT ---
-            if not user_input.strip(): # If the input is empty or just spaces
-                continue # Skip the rest of the loop and ask again
-            # --- END OF NEW CHECK ---
-
-            if user_input.lower() == 'salir': 
-                break
+            if not user_input.strip(): continue
+            if user_input.lower() == 'salir': break
 
             query_lower = user_input.lower()
             if 'actualiza' in query_lower or 'update' in query_lower or 'sincroniza' in query_lower or 'sync' in query_lower:
@@ -204,8 +194,16 @@ if __name__ == '__main__':
                 print("\nLola: ¡Sincronización completada! Ya tengo la información más reciente.")
                 continue
             
-            response = lola.answer_query(user_input)
-            print(f"\nLola: {response}")
+            # --- NEW: ROBUST ERROR HANDLING AROUND THE ENTIRE QUERY PROCESS ---
+            try:
+                response = lola.answer_query(user_input)
+                print(f"\nLola: {response}")
+            except Exception as e:
+                if "429" in str(e) and "quota" in str(e).lower():
+                    print(f"\nLola: He recibido demasiadas peticiones en este momento. Por favor, espera un minuto antes de volver a preguntar.")
+                else:
+                    print(f"\nLola: Lo siento, tuve un problema inesperado al procesar tu petición. Error: {e}")
+            # --- END OF NEW ERROR HANDLING ---
             
     finally:
         print("\nApagando Lola Agent...")
