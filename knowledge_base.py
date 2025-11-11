@@ -61,6 +61,16 @@ class KnowledgeBase:
         except Exception as e:
             print(f"Error al actualizar documento {doc_id} en ChromaDB: {e}")
 
+    def count_documents(self):
+        """Returns the total number of chunks in the database."""
+        if not self.is_functional:
+            return 0
+        try:
+            return self.collection.count()
+        except Exception as e:
+            print(f"Error al contar documentos en ChromaDB: {e}")
+            return 0
+
     def query(self, query_text, n_results=5):
         """Queries the collection for documents similar to the query text."""
         if not self.is_functional:
@@ -75,3 +85,17 @@ class KnowledgeBase:
         except Exception as e:
             print(f"Error en la consulta de ChromaDB: {e}")
             return {'documents': [[]], 'metadatas': [[]]}
+        
+    def get_all_document_names(self):
+        """Returns a list of unique document names from the collection's metadata."""
+        if not self.is_functional:
+            return []
+        try:
+            # This gets ALL metadata from the collection
+            all_metadata = self.collection.get(include=["metadatas"])['metadatas']
+            # Use a set to store only unique file names
+            unique_names = set(meta.get('file_name', 'Desconocido') for meta in all_metadata)
+            return sorted(list(unique_names))
+        except Exception as e:
+            print(f"Error al obtener los nombres de los documentos: {e}")
+            return []    

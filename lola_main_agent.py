@@ -77,7 +77,7 @@ class LolaAgent:
         
         print("--- Fase 1: Recopilando y procesando todos los documentos de Drive ---")
         
-        all_chunks_to_add = [] # We will store everything here first
+        all_chunks_to_add = [] 
         
         files = list_all_files_in_folder_recursive(self.drive_service, self.chainbrief_root_folder_id)
         print(f"Se encontraron {len(files)} archivos para procesar en Drive...")
@@ -97,7 +97,6 @@ class LolaAgent:
                 for i, chunk_content in enumerate(chunks):
                     chunk_id = f"{file_id}-{i}"
                     metadata = { "file_id": file_id, "file_name": file_name, "mime_type": mime_type }
-                    # Add a dictionary to our temporary list
                     all_chunks_to_add.append({'id': chunk_id, 'content': chunk_content, 'metadata': metadata})
             else:
                 print(f"No se pudo extraer el contenido de {file_name}.")
@@ -105,7 +104,6 @@ class LolaAgent:
         print(f"\n--- Fase 2: Añadiendo {len(all_chunks_to_add)} fragmentos a la base de datos ---")
         
         if all_chunks_to_add:
-            # Now, add everything to ChromaDB in one go (or in batches if needed, but this is fine for now)
             for chunk_data in all_chunks_to_add:
                 self.knowledge_base.add_document(
                     doc_id=chunk_data['id'],
@@ -117,10 +115,38 @@ class LolaAgent:
         self.last_update_check_time = datetime.now()
 
     def answer_query(self, user_query):
-        """Answers a user query using RAG."""
+        """Answers a user query using a more flexible tool router and RAG."""
         if not lola_gemini_model:
             return "Lo siento, mi modelo de lenguaje no está inicializado. No puedo responder."
+
         print(f"\nUsuario: {user_query}")
+        
+        # --- NEW & IMPROVED: FLEXIBLE TOOL ROUTER ---
+        # Normalize the query to lowercase and without accents for better matching
+        import unicodedata
+        def normalize_text(text):
+            return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn').lower()
+
+        normalized_query = normalize_text(user_query)
+
+        # Tool 1: Count Documents (now checks for multiple keywords)
+        if ('cuantos' in normalized_query and 'documentos' in normalized_query) or 'how many documents' in normalized_query:
+            doc_count = self.knowledge_base.count_documents()
+            return f"Actualmente tengo {doc_count} fragmentos de texto indexados en mi base de conocimiento."
+
+        # Tool 2: List All Documents (now checks for multiple keywords)
+        if ('lista' in normalized_query and 'documentos' in normalized_query) or 'list of documents' in normalized_query:
+            doc_names = self.knowledge_base.get_all_document_names()
+            if doc_names:
+                doc_list_formatted = "\n".join([f"- {name}" for name in doc_names])
+                return f"Claro, aquí tienes la lista de los documentos que tengo en mi base de conocimiento:\n{doc_list_formatted}"
+            else:
+                return "No encontré ningún documento en mi base de conocimiento en este momento."
+        
+        # --- END OF TOOL ROUTER ---
+
+
+        # --- Default Action: RAG Process for knowledge questions ---
         persona_prompt = (
             "Eres un asistente de IA llamado Lola, un experto en los documentos internos de ChainBrief. "
             "Tu tarea es responder preguntas basándote **única y exclusivamente** en la información proporcionada en la sección 'Información Relevante'. "
@@ -140,26 +166,75 @@ class LolaAgent:
                 print("🔍 No se encontraron documentos relevantes en la base de conocimiento.")
         else:
             print("❌ Base de conocimiento no funcional. La consulta RAG no se ejecutará.")
+
+        # This line is now correct
         context_prompt = ""
         if retrieved_content:
             context_prompt = "\n\n**Información Relevante:**\n" + "\n---\n".join(retrieved_content)
+        
         full_prompt = f"{persona_prompt}{context_prompt}\n\n**Consulta del Usuario:** {user_query}\n\n**Respuesta de Lola:**"
+        
         try:
             response = lola_gemini_model.generate_content(full_prompt)
             return response.text
         except Exception as e:
             return f"Lo siento, tuve un error al procesar tu consulta con Gemini Pro: {e}"
 
-# The main execution block remains the same
+    # --- NEW: IMPLEMENTED CHECK_FOR_UPDATES FUNCTION ---
+    def check_for_updates(self):
+        """Periodically checks Google Drive for new or modified files and updates the KB."""
+        print("\n--- [SCHEDULER] Realizando verificación periódica de actualizaciones en Drive ---")
+        current_time = datetime.now()
+        
+        query_time_str = self.last_update_check_time.isoformat("T") + "Z"
+        
+        updated_files = list_all_files_in_folder_recursive(
+            self.drive_service,
+            self.chainbrief_root_folder_id,
+            query_conditions=f"modifiedTime > '{query_time_str}'"
+        )
+
+        if not updated_files:
+            print("[SCHEDULER] No se encontraron nuevas actualizaciones.")
+        else:
+            print(f"✅ [SCHEDULER] Se encontraron {len(updated_files)} archivos actualizados.")
+            for file in updated_files:
+                file_id, file_name, mime_type = file['id'], file['name'], file['mimeType']
+                
+                try:
+                    self.knowledge_base.collection.delete(where={"file_id": file_id})
+                    print(f"[SCHEDULER] Eliminados los fragmentos antiguos del archivo: {file_name}")
+                except Exception as e:
+                    print(f"Advertencia: No se pudieron eliminar los fragmentos antiguos (puede que no existieran): {e}")
+
+                print(f"[SCHEDULER] Procesando archivo actualizado: {file_name}")
+                content = self._get_document_content(file_id, file_name, mime_type)
+                if content:
+                    chunks = chunk_text(content, chunk_size=1000, chunk_overlap=100)
+                    for i, chunk in enumerate(chunks):
+                        chunk_id = f"{file_id}-{i}"
+                        metadata = { "file_id": file_id, "file_name": file_name, "mime_type": mime_type }
+                        self.knowledge_base.add_document(chunk_id, chunk, metadata)
+        
+        self.last_update_check_time = current_time
+        print("--- [SCHEDULER] Verificación de actualizaciones finalizada. ---")
+    # --- END OF NEW FUNCTION ---
+
+# --- UPDATED: MAIN EXECUTION BLOCK WITH SCHEDULER ---
 if __name__ == '__main__':
     print("Iniciando Lola Agent...")
     lola = LolaAgent()
     print("\nIniciando población inicial...")
     lola.populate_knowledge_base()
     print("Población inicial completada.")
+    
+    # --- NEW: SCHEDULER IS NOW CONFIGURED AND RUNNING ---
     scheduler = BackgroundScheduler()
+    scheduler.add_job(lola.check_for_updates, 'interval', minutes=30, id="drive_update_check")
     scheduler.start()
-    print("\nLola está lista. Haz tus preguntas sobre ChainBrief.")
+    print("Lola Agent running with scheduled tasks. Type 'salir' to exit.")
+    # --- END OF NEW SCHEDULER LOGIC ---
+
     try:
         while True:
             user_input = input("\nTu pregunta: ")
