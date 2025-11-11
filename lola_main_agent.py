@@ -139,8 +139,12 @@ class LolaAgent:
             else: # "qa" es el default
                 return perform_qa(user_query, lola_gemini_model, self.knowledge_base)
         except Exception as e:
-            print(f"❌ Error ejecutando la herramienta '{chosen_tool}': {e}")
-            return "Lo siento, tuve un problema al procesar tu petición con la herramienta seleccionada."
+            if "429" in str(e) and "quota" in str(e).lower():
+                print(f"❌ Límite de tasa de Gemini alcanzado. Error: {e}")
+                return "He recibido demasiadas peticiones en este momento. Por favor, espera un minuto antes de volver a preguntar."
+            else:
+                print(f"❌ Error ejecutando la herramienta: {e}")
+                return "Lo siento, tuve un problema inesperado al procesar tu petición."
 
     def check_for_updates(self):
         """Periodically checks Google Drive for new or modified files and updates the KB."""
