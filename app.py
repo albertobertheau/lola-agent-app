@@ -75,14 +75,29 @@ for message in st.session_state.messages:
 
 # Chat Input and Response Logic
 if prompt := st.chat_input("¿Qué te gustaría saber?"):
+    # Add user's message to history and display it
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
+    # Get and display Lola's response
     with st.chat_message("assistant"):
         with st.spinner("Lola está pensando..."):
-            # The regular chat input still uses the main answer_query router
-            response = lola.answer_query(prompt)
+            
+            # --- NEW: ROBUST ERROR HANDLING FOR THE UI ---
+            try:
+                # The regular chat input still uses the main answer_query router
+                response = lola.answer_query(prompt)
+            except Exception as e:
+                if "429" in str(e) and "quota" in str(e).lower():
+                    print(f"❌ Límite de tasa de Gemini alcanzado en la app. Error: {e}")
+                    response = "He recibido demasiadas peticiones en este momento. Por favor, espera un minuto antes de volver a preguntar."
+                else:
+                    print(f"❌ Error inesperado en la app: {e}")
+                    response = "Lo siento, tuve un problema inesperado al procesar tu petición."
+            # --- END OF NEW ERROR HANDLING ---
+
         st.markdown(response)
     
-    st.session_state.messages.append({"role": "assistant", "content": response})    
+    # Add Lola's response to history
+    st.session_state.messages.append({"role": "assistant", "content": response})
