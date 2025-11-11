@@ -266,3 +266,53 @@ def update_google_doc_content(doc_id, new_content):
     result = docs_service.documents().batchUpdate(documentId=doc_id, body={'requests': requests}).execute()
     print(f"Google Doc '{doc_id}' actualizado.")
     return result
+
+def append_to_google_doc(service, document_id, text_to_append):
+    """Añade texto al final de un Google Doc específico."""
+    try:
+        # La API de Docs es un servicio separado que se construye usando las credenciales del servicio de Drive
+        docs_service = build('docs', 'v1', credentials=service._http.credentials)
+        
+        # Primero, obtenemos el documento para encontrar el final del contenido
+        document = docs_service.documents().get(documentId=document_id).execute()
+        end_index = document.get('body').get('content')[-1].get('endIndex') - 1
+
+        # Preparamos el texto a insertar, asegurándonos de que empiece en una nueva línea
+        if not text_to_append.startswith('\n'):
+            text_to_append = '\n' + text_to_append
+
+        requests = [{
+            'insertText': {
+                'location': { 'index': end_index },
+                'text': text_to_append
+            }
+        }]
+        
+        docs_service.documents().batchUpdate(documentId=document_id, body={'requests': requests}).execute()
+        print(f"✅ Texto añadido con éxito al Google Doc ID: {document_id}")
+        return True
+    except Exception as e:
+        print(f"❌ Error al escribir en el Google Doc: {e}")
+        return False
+
+def append_row_to_google_sheet(service, spreadsheet_id, row_data):
+    """Añade una fila de datos al final de una Google Sheet."""
+    try:
+        # La API de Sheets también es un servicio separado
+        sheets_service = build('sheets', 'v4', credentials=service._http.credentials)
+        
+        body = {
+            'values': [row_data] # La API espera una lista de listas
+        }
+        
+        sheets_service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range='A1', # La API encontrará la primera tabla en la hoja 'A1' y añadirá al final
+            valueInputOption='USER_ENTERED',
+            body=body
+        ).execute()
+        print(f"✅ Fila añadida con éxito a la Google Sheet ID: {spreadsheet_id}")
+        return True
+    except Exception as e:
+        print(f"❌ Error al escribir en la Google Sheet: {e}")
+        return False

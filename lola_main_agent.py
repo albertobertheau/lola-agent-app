@@ -10,7 +10,7 @@ from drive_utils import get_drive_service, list_all_files_in_folder_recursive, d
 from doc_processor import read_text_from_file, chunk_text
 from knowledge_base import KnowledgeBase
 from gemini_agent import summarize_text_with_gemini
-from lola_tools import perform_qa, perform_content_generation, perform_strategic_analysis
+from lola_tools import perform_qa, perform_content_generation, perform_strategic_analysis, perform_document_writing
 
 import streamlit as st
 
@@ -38,6 +38,7 @@ except Exception as e:
 class LolaAgent:
     def __init__(self, kb_collection_name="chainbrief_docs", temp_dir="temp_docs"):
         self.drive_service = get_drive_service()
+        self.lola_gemini_model = lola_gemini_model 
         self.knowledge_base = KnowledgeBase(collection_name=kb_collection_name)
         self.temp_dir = temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -99,34 +100,42 @@ class LolaAgent:
     def route_query(self, user_query):
         """Usa el LLM para clasificar la intención del usuario y elegir una herramienta."""
         print(f"🚦 Enrutando la petición: '{user_query}'")
+        
         routing_prompt = f"""
-        Dada la siguiente petición de un usuario, clasifícala en una de las siguientes tres categorías:
-        1.  "qa": Si es una pregunta directa sobre hechos, datos o información específica contenida en los documentos. Ejemplos: "¿Quién es el CEO?", "¿Cuál es nuestro mercado objetivo?".
-        2.  "generation": Si pide crear contenido nuevo, como un borrador de un email, un tweet, un resumen o un post. Ejemplos: "Redacta un email para inversores", "Resume el pitch deck".
-        3.  "analysis": Si pide una opinión, recomendación, análisis, comparación, o una lista de pros/contras. Ejemplos: "¿Cuáles son los riesgos de nuestro plan?", "Dame ideas para mejorar el marketing".
+        Dada la siguiente petición de un usuario, clasifícala en una de las siguientes cuatro categorías:
+        1.  "qa": Si es una pregunta directa sobre hechos. Ej: "¿Quién es el CEO?".
+        2.  "generation": Si pide crear contenido nuevo. Ej: "Redacta un email".
+        3.  "analysis": Si pide una opinión, recomendación o análisis. Ej: "¿Cuáles son nuestros riesgos?".
+        4.  "writing": Si es una orden para añadir, actualizar, escribir o registrar información en un documento. Ej: "Añade esto al Q&A", "Actualiza el itinerario con esta reunión".
+
         Petición del usuario: "{user_query}"
-        Responde únicamente con una de las tres categorías en minúsculas: "qa", "generation", o "analysis".
+
+        Responde únicamente con una de las cuatro categorías en minúsculas.
         """
+        
         response = lola_gemini_model.generate_content(routing_prompt)
         tool_name = response.text.strip().lower()
-        if tool_name not in ["qa", "generation", "analysis"]:
+        
+        if tool_name not in ["qa", "generation", "analysis", "writing"]:
             return "qa"
+        
         return tool_name
 
     def answer_query(self, user_query):
         """Responde a una consulta del usuario usando el enrutador de tareas."""
         if not lola_gemini_model:
             return "Lo siento, mi modelo no está inicializado."
-        
-        # 1. Enrutar la petición para decidir qué herramienta usar
+            
         chosen_tool = self.route_query(user_query)
         
-        # 2. Ejecutar la herramienta seleccionada
         try:
             if chosen_tool == "generation":
                 return perform_content_generation(user_query, lola_gemini_model, self.knowledge_base)
             elif chosen_tool == "analysis":
                 return perform_strategic_analysis(user_query, lola_gemini_model, self.knowledge_base)
+            elif chosen_tool == "writing":
+                # La herramienta de escritura necesita el 'drive_service' en lugar de la 'knowledge_base'
+                return perform_document_writing(user_query, lola_gemini_model, self.drive_service)
             else: # "qa" es el default
                 return perform_qa(user_query, lola_gemini_model, self.knowledge_base)
         except Exception as e:
@@ -175,15 +184,25 @@ if __name__ == '__main__':
     try:
         while True:
             user_input = input("\nTu pregunta: ")
-            if user_input.lower() == 'salir': break
+            
+            # --- NEW: CHECK FOR EMPTY INPUT ---
+            if not user_input.strip(): # If the input is empty or just spaces
+                continue # Skip the rest of the loop and ask again
+            # --- END OF NEW CHECK ---
+
+            if user_input.lower() == 'salir': 
+                break
+
             query_lower = user_input.lower()
             if 'actualiza' in query_lower or 'update' in query_lower or 'sincroniza' in query_lower or 'sync' in query_lower:
                 print("\nLola: Entendido. Iniciando una sincronización manual con Google Drive...")
                 lola.check_for_updates()
                 print("\nLola: ¡Sincronización completada! Ya tengo la información más reciente.")
                 continue
+            
             response = lola.answer_query(user_input)
             print(f"\nLola: {response}")
+            
     finally:
         print("\nApagando Lola Agent...")
         scheduler.shutdown()

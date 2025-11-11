@@ -1,4 +1,7 @@
+import os
 import google.generativeai as genai
+
+from drive_utils import append_to_google_doc, append_row_to_google_sheet
 
 # Asumimos que lola_gemini_model y knowledge_base se pasarán a estas funciones
 # para que no tengamos que inicializarlos aquí.
@@ -68,3 +71,54 @@ def perform_strategic_analysis(user_query, lola_gemini_model, knowledge_base):
     
     response = lola_gemini_model.generate_content(full_prompt)
     return response.text
+
+def perform_document_writing(user_query, lola_gemini_model, drive_service):
+    """Herramienta para interpretar una orden y escribir en un Google Doc o Sheet."""
+    print("✍️ Usando Herramienta: Escritor de Documentos")
+
+    # Obtenemos las IDs de los documentos desde las variables de entorno
+    qna_doc_id = os.getenv("QNA_DOC_ID")
+    itinerary_sheet_id = os.getenv("ITINERARY_SHEET_ID")
+
+    writing_prompt = f"""
+    Tu tarea es actuar como un asistente de escritura. Analiza la petición del usuario y extráela en un formato JSON estructurado.
+    La petición especificará un documento de destino y el contenido a escribir.
+
+    Los posibles documentos de destino son:
+    - "qna_document": Si el usuario menciona "Q&A", "preguntas y respuestas", o un formato similar.
+    - "itinerary_sheet": Si el usuario menciona "itinerario", "agenda", "calendario" o un evento.
+
+    El contenido a escribir debe ser extraído literalmente de la petición.
+    - Para "qna_document", el contenido debe ser el texto completo a añadir.
+    - Para "itinerary_sheet", el contenido debe ser una lista de strings representando las columnas (ej: ["Fecha", "Hora", "Evento"]).
+
+    Petición del usuario: "{user_query}"
+
+    Responde únicamente con un objeto JSON con las claves "target_document" y "content_to_write".
+    Ejemplo para Q&A: {{"target_document": "qna_document", "content_to_write": "P: ¿Cuál es nuestro inversor principal?\\nR: Aún no tenemos uno."}}
+    Ejemplo para Itinerario: {{"target_document": "itinerary_sheet", "content_to_write": ["2025-11-20", "3:00 PM", "Reunión con inversores"]}}
+    """
+
+    try:
+        response = lola_gemini_model.generate_content(writing_prompt)
+        # Limpiamos la respuesta para obtener solo el JSON
+        json_response_text = response.text.strip().replace("```json", "").replace("```", "")
+        
+        import json
+        action = json.loads(json_response_text)
+        
+        target = action.get("target_document")
+        content = action.get("content_to_write")
+
+        if target == "qna_document":
+            if append_to_google_doc(drive_service, qna_doc_id, content):
+                return "Entendido. He actualizado el documento de Preguntas y Respuestas."
+        elif target == "itinerary_sheet":
+            if append_row_to_google_sheet(drive_service, itinerary_sheet_id, content):
+                return "De acuerdo. He añadido la entrada al Itinerario del Proyecto."
+        
+        return "No pude determinar el documento de destino o el contenido a escribir. Por favor, sé más específico."
+
+    except Exception as e:
+        print(f"❌ Error en la herramienta de escritura: {e}")
+        return "Lo siento, tuve un problema al interpretar tu instrucción de escritura. Inténtalo de nuevo."
