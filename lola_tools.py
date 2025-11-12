@@ -8,31 +8,77 @@ from drive_utils import append_to_google_doc, append_row_to_google_sheet
 
 def perform_qa(user_query, lola_gemini_model, knowledge_base):
     """
-    Herramienta para Preguntas y Respuestas directas.
-    Es estricta para no usar conocimiento externo, pero puede sintetizar respuestas.
+    Herramienta para Q&A que primero corrige y expande la consulta, y luego usa multi-consulta.
     """
-    print("🧠 Usando Herramienta: Pregunta y Respuesta (Q&A) - Modo Balanceado")
+    print("🧠 Usando Herramienta: Pregunta y Respuesta (Q&A) - Modo Auto-Corrección")
     
-    # --- THIS IS THE NEW, BALANCED PROMPT ---
+    # --- NEW STAGE 0: QUERY CORRECTION AND EXPANSION ---
+    correction_prompt = f"""
+    Analiza la siguiente 'Pregunta Original del Usuario'. Tu tarea es reescribirla para que sea una consulta de búsqueda más efectiva.
+    Corrige cualquier error ortográfico. Expande los términos a sus conceptos clave.
+    Por ejemplo, si el usuario escribe 'info del modelo freemiun', una buena reescritura sería 'modelo de negocio freemium precios características'.
+
+    Pregunta Original del Usuario: "{user_query}"
+
+    Consulta Mejorada:
+    """
+    try:
+        response = lola_gemini_model.generate_content(correction_prompt)
+        corrected_query = response.text.strip()
+        print(f"✅ Consulta original corregida y mejorada a: '{corrected_query}'")
+    except Exception as e:
+        print(f"Advertencia: Falló la corrección de la consulta. Usando la consulta original. Error: {e}")
+        corrected_query = user_query # Fallback to the original query
+    # --- END OF NEW STAGE ---
+
+    # --- STAGE 1: KEYWORD GENERATION (Now uses the corrected query) ---
+    keyword_generation_prompt = f"""
+    Dada la siguiente consulta de búsqueda, genera 3 consultas alternativas y concisas.
+    Consulta de búsqueda: "{corrected_query}"
+    Consultas alternativas:
+    """
+    try:
+        response = lola_gemini_model.generate_content(keyword_generation_prompt)
+        alternative_queries = response.text.strip().split(';')
+    except Exception as e:
+        print(f"Advertencia: Falló la generación de consultas alternativas. Usando solo la consulta mejorada. Error: {e}")
+        alternative_queries = []
+
+    # Combine the corrected query with the generated ones
+    all_queries = [corrected_query] + alternative_queries
+    print(f"🔍 Ejecutando búsquedas para las consultas: {all_queries}")
+    
+    # --- STAGE 2: MULTI-QUERY RETRIEVAL ---
+    all_retrieved_chunks = []
+    retrieved_ids = set()
+    for query in all_queries:
+        if not query: continue
+        results = knowledge_base.query(query, n_results=3)
+        if results and results['ids'] and results['ids'][0]:
+            for i in range(len(results['ids'][0])):
+                chunk_id = results['ids'][0][i]
+                if chunk_id not in retrieved_ids:
+                    all_retrieved_chunks.append(results['documents'][0][i])
+                    retrieved_ids.add(chunk_id)
+
+    if not all_retrieved_chunks:
+        return "No tengo esa información específica en mis documentos."
+
+    # --- STAGE 3: SYNTHESIS (The same strict but synthesizing prompt) ---
     persona_prompt = (
-        "Eres un asistente de IA experto llamado Lola. Tu tarea es responder la 'Pregunta del Usuario' basándote únicamente en la información contenida en el 'Contexto del Documento'.\n"
+        "Eres un asistente de IA experto llamado Lola. Tu tarea es responder la 'Pregunta del Usuario Original' basándote únicamente en la información contenida en el 'Contexto del Documento'.\n"
         "REGLAS IMPORTANTES:\n"
-        "1. Tu respuesta DEBE derivarse exclusivamente del 'Contexto del Documento'. No utilices conocimiento externo.\n"
-        "2. Puedes sintetizar y combinar información de diferentes partes del contexto para construir una respuesta completa y coherente.\n"
-        "3. Si, después de analizar todo el contexto, la respuesta a la pregunta no se puede construir, responde de forma clara y directa: 'No tengo esa información específica en mis documentos.' No inventes ni supongas nada."
+        "1. Tu respuesta DEBE derivarse exclusivamente del 'Contexto del Documento'.\n"
+        "2. Sintetiza la información para construir una respuesta completa y coherente.\n"
+        "3. Si la respuesta no se puede construir, responde de forma clara y directa: 'No tengo esa información específica en mis documentos.'"
     )
     
-    # RAG Logic (The same as before)
-    results = knowledge_base.query(user_query, n_results=5)
-    retrieved_content = []
-    if results and results['documents'] and results['documents'][0]:
-        retrieved_content = results['documents'][0]
+    context_prompt = "\n\n**Contexto del Documento:**\n---\n" + "\n---\n".join(all_retrieved_chunks) + "\n---\n"
+    # Note: We use the *original* user_query here for the final answer, which feels more natural.
+    full_prompt = f"{persona_prompt}\n\n**Pregunta del Usuario Original:** {user_query}\n\n**Respuesta de Lola:**"
     
-    context_prompt = "\n\n**Contexto del Documento:**\n---\n" + "\n---\n".join(retrieved_content) + "\n---\n"
-    full_prompt = f"{persona_prompt}\n\n**Pregunta del Usuario:** {user_query}\n\n**Respuesta de Lola:**"
-    
-    response = lola_gemini_model.generate_content(full_prompt)
-    return response.text
+    final_response = lola_gemini_model.generate_content(full_prompt)
+    return final_response.text
 
 def perform_content_generation(user_query, lola_gemini_model, knowledge_base):
     """Herramienta para generar contenido creativo (emails, tweets, etc.) basado en los documentos."""
